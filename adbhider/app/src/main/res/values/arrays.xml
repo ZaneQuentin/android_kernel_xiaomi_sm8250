@@ -1,8 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- 推荐作用域：系统框架（provider 层全局拦截）+ 春秋检测（应用侧兜底） -->
+    <!-- 推荐作用域：只到框架层，绝不包含任何被检测应用。
+         system = system_server，拦截实际发生在这里（必需）
+         android = 部分系统组件从 android 进程取 context（保守冗余）
+         注意：禁止加入 com.chunqiunativecheck 等应用。注入会在目标进程留下
+         hook 痕迹（dex/so 映射、XposedBridge 类），对方反 hook 检测即命中，
+         现象为闪退或被判"风险应用"。全局伪装在 system_server 已完成，无需注入。 -->
     <string-array name="xposedscope">
         <item>android</item>
-        <item>com.chunqiunativecheck</item>
+        <item>system</item>
     </string-array>
 </resources>
