@@ -75,8 +75,19 @@ if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
     echo " [*] Initializing KernelSU (ReSukiSU) Setup"
     echo "==========================================="
-    echo "[*] Downloading and running ReSukiSU remote setup script..."
-    curl -LSs "https://raw.githubusercontent.com/ReSukiSU/ReSukiSU/main/kernel/setup.sh" | bash
+    # 固定到包含 selinux_hide 时间侧信道修复的提交
+    # (cherry-pick of tiann/KernelSU#3877, "fix time side-channel detection in selinux hide")
+    KSU_COMMIT="fa12ffde8244008e9afdb7ac0c1bb1bc1b06b95a"
+    echo "[*] Downloading and running BakaSU remote setup script..."
+    curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
+    echo "[*] Pinning KernelSU to ${KSU_COMMIT} ..."
+    ( cd KernelSU && git checkout -q "${KSU_COMMIT}" && git log -1 --oneline )
+    # SUSFS 上游暂时中止与新版 KernelSU 的构建检查，移除硬错误以保留 SUSFS 功能
+    # （仅影响 make 层的 “Please wait susfs update.” error，不改动任何代码）
+    if [ -f KernelSU/kernel/tools/susfs_compat.mk ]; then
+        sed -i '/\$(error Please wait susfs update\.)/d' KernelSU/kernel/tools/susfs_compat.mk
+        echo "[*] susfs_compat.mk: hard error removed, SUSFS kept enabled."
+    fi
     echo "[+] KernelSU setup finished."
 fi
 
