@@ -1,0 +1,82 @@
+name: Build Custom Manager
+
+on:
+  workflow_dispatch:
+    inputs:
+      pkg:
+        description: 'applicationId (custom package name)'
+        required: true
+        default: 'com.lantern.tools'
+      appname:
+        description: 'App label'
+        required: false
+        default: '工具'
+  push:
+    paths:
+      - '.github/workflows/build-manager-custom.yml'
+
+jobs:
+  build-manager:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Prepare workspace
+        run: |
+          sudo mkdir -p /work && sudo chown -R $(id -u):$(id -g) /work
+          echo "WORK=/work" >> $GITHUB_ENV
+
+      - name: Clone manager source
+        run: |
+          git clone --filter=blob:none https://github.com/Baka-SU/BakaSU.git /work/bs
+          cd /work/bs
+          git checkout -q f33c166cb101a6a9ecdf6749dc52775356e43e64
+          echo "=== HEAD ==="; git log -1 --oneline
+          echo "=== uapi ==="; grep -n 'KERNEL_SU_UAPI_VERSION =' uapi/supercall.h
+
+      - name: Generate keystore and certificate fingerprint
+        id: key
+        run: |
+          PW=$(openssl rand -hex 16)
+          keytool -genkeypair -alias mgr -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass "$PW" -keypass "$PW" -dname "CN=Tools" \
+            -storetype JKS -keystore /work/bs/manager/key.jks
+          keytool -exportcert -alias mgr -keystore /work/bs/manager/key.jks -storepass "$PW" -file /work/cert.der
+          SIZE_HEX=$(printf '0x%04x' $(stat -c%s /work/cert.der))
+          HASH=$(sha256sum /work/cert.der | awk '{print $1}')
+          echo "cert_size=$SIZE_HEX" >> $GITHUB_OUTPUT
+          echo "cert_hash=$HASH" >> $GITHUB_OUTPUT
+          {
+            echo "KEYSTORE_PASSWORD=$PW"
+            echo "KEY_ALIAS=mgr"
+            echo "KEY_PASSWORD=$PW"
+            echo "KEYSTORE_FILE=key.jks"
+          } >> /work/bs/manager/gradle.properties
+          echo "cert_size=$SIZE_HEX"
+          echo "cert_hash=$HASH"
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Build release APK
+        working-directory: /work/bs/manager
+        run: |
+          ./gradlew assembleRelease --no-daemon \
+            -PKSU_PACKAGE_NAME="${{ inputs.pkg || 'com.lantern.tools' }}" \
+            -PKSU_NAME="${{ inputs.appname || '工具' }}"
+
+      - name: List outputs
+        run: ls -l /work/bs/manager/app/build/outputs/apk/release/ || true
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: custom-manager
+          path: /work/bs/manager/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error
