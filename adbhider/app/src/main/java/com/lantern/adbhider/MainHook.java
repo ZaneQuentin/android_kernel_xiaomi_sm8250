@@ -92,8 +92,26 @@ public class MainHook implements IXposedHookLoadPackage {
                 try {
                     Object[] a = param.args;
                     if (a == null || a.length < 2) return;
-                    if (!(a[1] instanceof String) || !KEY.equals(a[1])) return;
                     if (!(param.getResult() instanceof Bundle)) return;
+
+                    // call 有多个重载：
+                    //   call(String method, String arg, Bundle extras)
+                    //   call(AttributionSource src, String method, String arg, Bundle extras)
+                    // 统一按 "GET_* 方法名 + 紧随其后的 name 参数" 定位
+                    String method = null, name = null;
+                    for (int i = 0; i < a.length; i++) {
+                        if (a[i] instanceof String) {
+                            String s = (String) a[i];
+                            if (s.startsWith("GET_") || s.startsWith("PUT_")) {
+                                method = s;
+                                if (i + 1 < a.length && a[i + 1] instanceof String) {
+                                    name = (String) a[i + 1];
+                                }
+                                break;
+                            }
+                        }
+                    }
+                    if (method == null || !KEY.equals(name)) return;
                     if (!shouldMaskCaller()) return;
 
                     Bundle b = (Bundle) param.getResult();
