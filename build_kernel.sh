@@ -84,6 +84,16 @@ if [ "$ENABLE_KSU" -eq 1 ]; then
     curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
     echo "[*] Pinning KernelSU to ${KSU_COMMIT} ..."
     ( cd KernelSU && git fetch -q origin main && git checkout -q "${KSU_COMMIT}" && git log -1 --oneline )
+    # === 追加 backport: d7260ca1 "kernel: check context_add_hash before operate sidtab" ===
+    # 4.19 CLO 已回移 sidtab 反向哈希表(context_add_hash)，缺少该检查会让同一 context
+    # 映射到多个 sid，selinux_hide 因此留下可被探测的不一致。
+    # 只取该提交的 selinux_hide.c / kernel_compat.mk 两个文件（= fa12ffde + 此修复）。
+    echo "[*] Backporting context_add_hash fix (d7260ca1) ..."
+    ( cd KernelSU \
+      && git fetch -q origin "+refs/heads/*:refs/remotes/origin/*" \
+      && git checkout -q d7260ca1e5c128061122924d0d48754e361e135c -- \
+             kernel/feature/selinux_hide.c kernel/tools/kernel_compat.mk \
+      && grep -n 'KSU_COMPAT_HAS_CONTEXT_ADD_HASH' kernel/tools/kernel_compat.mk kernel/feature/selinux_hide.c | head -5 )
     # uapi 对齐：管理器 BakaSU-DEV 为 (35245/6)。内核若报 5 则
     # isFullFeatured()==false -> 管理器降级、隐藏「超级用户/模块」页、模块不挂载。
     # uapi 5->6 为纯增量(新增 feature id 6 / PREINIT flag / LOOKUP_SYMBOLS ioctl)，
