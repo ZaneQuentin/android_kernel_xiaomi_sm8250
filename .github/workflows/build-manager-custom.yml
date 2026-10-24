@@ -24,7 +24,6 @@ jobs:
       - name: Prepare workspace
         run: |
           sudo mkdir -p /work && sudo chown -R $(id -u):$(id -g) /work
-          echo "WORK=/work" >> $GITHUB_ENV
 
       - name: Clone manager source
         run: |
@@ -55,6 +54,43 @@ jobs:
           echo "cert_size=$SIZE_HEX"
           echo "cert_hash=$HASH"
 
+      - name: Setup NDK
+        uses: nttld/setup-ndk@v1
+        id: setup-ndk
+        with:
+          ndk-version: r29
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly
+          targets: aarch64-linux-android
+          components: rust-src
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      - name: Build ksud
+        working-directory: /work/bs
+        env:
+          ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
+          KSU_PACKAGE_NAME: ${{ inputs.pkg || 'com.lantern.tools' }}
+        run: |
+          clang --target=aarch64-linux-gnu -c -nostdlib \
+            -o userspace/ksud/.lkm_image_bootstrap.o \
+            userspace/ksud/src/lkm_image_bootstrap.S
+          cd userspace/ksud
+          cargo ndk b -P 26 -t aarch64-linux-android -r -Z build-std-features="optimize_for_size" -Z trim-paths
+          ls -l target/aarch64-linux-android/release/ksud
+
+      - name: Inject ksud as libksud.so
+        run: |
+          mkdir -p /work/bs/manager/app/src/main/jniLibs/arm64-v8a
+          cp /work/bs/userspace/ksud/target/aarch64-linux-android/release/ksud \
+             /work/bs/manager/app/src/main/jniLibs/arm64-v8a/libksud.so
+          chmod 644 /work/bs/manager/app/src/main/jniLibs/arm64-v8a/libksud.so
+          ls -l /work/bs/manager/app/src/main/jniLibs/arm64-v8a/
+
       - name: Setup Java
         uses: actions/setup-java@v6
         with:
@@ -71,8 +107,13 @@ jobs:
             -PKSU_PACKAGE_NAME="${{ inputs.pkg || 'com.lantern.tools' }}" \
             -PKSU_NAME="${{ inputs.appname || '工具' }}"
 
-      - name: List outputs
-        run: ls -l /work/bs/manager/app/build/outputs/apk/release/ || true
+      - name: Verify libksud inside APK
+        run: |
+          ls -l /work/bs/manager/app/build/outputs/apk/release/
+          for f in /work/bs/manager/app/build/outputs/apk/release/*arm64*.apk; do
+            echo "== $f"
+            unzip -l "$f" | grep -i ksud || echo "NO libksud in $f"
+          done
 
       - name: Upload APK
         uses: actions/upload-artifact@v7
