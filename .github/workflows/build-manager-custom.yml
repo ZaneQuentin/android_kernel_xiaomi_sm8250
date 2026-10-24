@@ -46,6 +46,18 @@ jobs:
           assert 'android:scheme="ksu"' not in s2, 'ksu scheme still present'
           PY
 
+      - name: Silence unofficial-signature banner
+        run: |
+          python3 - <<'PY'
+          p = '/work/bs/manager/app/src/main/java/org/bakasu/bakasu/data/shell/KsuCli.kt'
+          s = open(p, encoding='utf-8').read()
+          old = '.orEmpty() == "size: 0x377, hash: d3469712b6214462764a1d8d3e5cbe1d6819a0b629791b9f4101867821f1df64"'
+          assert old in s, 'signature compare line not found'
+          s = s.replace(old, '.let { true }')
+          open(p, 'w', encoding='utf-8').write(s)
+          print('patched isOfficialSignature -> always true')
+          PY
+
       - name: Generate keystore and certificate fingerprint
         id: key
         run: |
