@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- 推荐作用域：系统框架（provider 层全局拦截）+ 春秋检测（应用侧兜底） -->
+    <string-array name="xposedscope">
+        <item>android</item>
+        <item>com.chunqiunativecheck</item>
+    </string-array>
+</resources>
