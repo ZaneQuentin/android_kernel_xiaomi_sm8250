@@ -75,16 +75,21 @@ if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
     echo " [*] Initializing KernelSU (ReSukiSU) Setup"
     echo "==========================================="
-    # 固定到 sync-upstream 分支：uapi=6，与 BakaSU-DEV 管理器 (35245/6) 对齐，
-    # 否则 isFullFeatured()==false，管理器降级、模块无法挂载。
-    # 该分支同时已包含 selinux_hide 时间侧信道修复 (fa12ffde / tiann#3877)。
-    KSU_COMMIT="f33c166cb101a6a9ecdf6749dc52775356e43e64"
-    KSU_BRANCH="sync-upstream"
+    # 基线：包含 selinux_hide 时间侧信道修复的提交
+    # (cherry-pick of tiann/KernelSU#3877, "fix time side-channel detection in selinux hide")
+    # 注：sync-upstream 分支已改用 5.x API (close_fd / ksu_preinit_handle_execve_manual)，
+    #     在 4.19 上链接失败，故仍使用本基线。
+    KSU_COMMIT="fa12ffde8244008e9afdb7ac0c1bb1bc1b06b95a"
     echo "[*] Downloading and running BakaSU remote setup script..."
     curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
-    echo "[*] Pinning KernelSU to ${KSU_BRANCH} @ ${KSU_COMMIT} ..."
-    ( cd KernelSU && git fetch -q origin "${KSU_BRANCH}" && git checkout -q "${KSU_COMMIT}" \
-      && grep -n 'KERNEL_SU_UAPI_VERSION =' uapi/supercall.h && git log -1 --oneline )
+    echo "[*] Pinning KernelSU to ${KSU_COMMIT} ..."
+    ( cd KernelSU && git fetch -q origin main && git checkout -q "${KSU_COMMIT}" && git log -1 --oneline )
+    # uapi 对齐：管理器 BakaSU-DEV 为 (35245/6)。内核若报 5 则
+    # isFullFeatured()==false -> 管理器降级、隐藏「超级用户/模块」页、模块不挂载。
+    # uapi 5->6 为纯增量(新增 feature id 6 / PREINIT flag / LOOKUP_SYMBOLS ioctl)，
+    # supported 字段 bit0 语义不变，故旧内核声明 uapi 6 兼容。
+    sed -i 's/KERNEL_SU_UAPI_VERSION = 5;/KERNEL_SU_UAPI_VERSION = 6;/' KernelSU/uapi/supercall.h
+    grep -n 'KERNEL_SU_UAPI_VERSION =' KernelSU/uapi/supercall.h
     # SUSFS 上游暂时中止与新版 KernelSU 的构建检查，移除硬错误以保留 SUSFS 功能
     # （仅影响 make 层的 “Please wait susfs update.” error，不改动任何代码）
     if [ -f KernelSU/kernel/tools/susfs_compat.mk ]; then
