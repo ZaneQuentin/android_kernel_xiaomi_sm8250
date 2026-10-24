@@ -33,6 +33,19 @@ jobs:
           echo "=== HEAD ==="; git log -1 --oneline
           echo "=== uapi ==="; grep -n 'KERNEL_SU_UAPI_VERSION =' uapi/supercall.h
 
+      - name: Strip ksu:// intent filters
+        run: |
+          python3 - <<'PY'
+          import re
+          p = '/work/bs/manager/app/src/main/AndroidManifest.xml'
+          s = open(p, encoding='utf-8').read()
+          pat = re.compile(r'[ \t]*<intent-filter>(?:(?!</intent-filter>).)*?android:scheme="ksu"(?:(?!</intent-filter>).)*?</intent-filter>\s*\n', re.S)
+          s2, n = pat.subn('', s)
+          open(p, 'w', encoding='utf-8').write(s2)
+          print('removed intent-filters:', n)
+          assert 'android:scheme="ksu"' not in s2, 'ksu scheme still present'
+          PY
+
       - name: Generate keystore and certificate fingerprint
         id: key
         run: |
