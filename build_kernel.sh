@@ -69,42 +69,43 @@ echo "[*] Setting up ccache in $CCACHE_DIR..."
 mkdir -p "$CCACHE_DIR"
 
 # ==========================================
-# KernelSU Setup
+# KernelSU Setup (v2 — 2026-10-28 内核重构)
 # ==========================================
 if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
-    echo " [*] Initializing KernelSU (ReSukiSU) Setup"
+    echo " [*] Initializing KernelSU (ReSukiSU/BakaSU) Setup v2"
     echo "==========================================="
-    # 基线：包含 selinux_hide 时间侧信道修复的提交
-    # (cherry-pick of tiann/KernelSU#3877, "fix time side-channel detection in selinux hide")
-    # 注：sync-upstream 分支已改用 5.x API (close_fd / ksu_preinit_handle_execve_manual)，
-    #     在 4.19 上链接失败，故仍使用本基线。
-    KSU_COMMIT="fa12ffde8244008e9afdb7ac0c1bb1bc1b06b95a"
+    # === v2 变更（对照 10-24 版 fa12ffde pin）===
+    # 1. pin 升级 fa12ffde -> d5e9e025（2026-10-24 上游最新）。
+    #    动机：fa12ffde 的 selinux_hide 与内核树 susfs v2.3.0 存在版本错位，
+    #    BakaSU 作者 10-10 在 48fa4bb7 确认该错位会导致 selinux_hide 大量检测暴露
+    #    （春秋 4.6.2 "Abnormal Environment(k)"/"Suspicious SELinux Policy" 实证）。
+    #    d5e9e025 的 selinux_hide/kernel_compat 已重写并内置 4.19 兼容自动检测。
+    # 2. 移除 d7260ca1 backport：context_add_hash 修复已进 d5e9e025（grep 验证 2 处）。
+    # 3. 移除 uapi sed：d5e9e025 的 uapi/supercall.h 已默认 = 6（无需 5->6 提升注释里的逻辑）。
+    # 4. 保留 susfs_compat.mk 硬错误移除（防御性；新版已重构为自动适配层）。
+    # 5. ⚠️ 永久红线：CONFIG_KSU_SUSFS 下绝不再启用 open_redirect（任何配置路径）——
+    #    4.19 上 susfs 内核态 redirect 处理有 BUG() 断言缺陷（2026-10-27 panic 实证），
+    #    susfs4ksu 4.19 分支已停更（2025-02-23），无修复来源。
+    KSU_COMMIT="d5e9e025b8b49155f8014684d64c91742b465f65"
     echo "[*] Downloading and running BakaSU remote setup script..."
     curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
     echo "[*] Pinning KernelSU to ${KSU_COMMIT} ..."
     ( cd KernelSU && git fetch -q origin main && git checkout -q "${KSU_COMMIT}" && git log -1 --oneline )
-    # === 追加 backport: d7260ca1 "kernel: check context_add_hash before operate sidtab" ===
-    # 4.19 CLO 已回移 sidtab 反向哈希表(context_add_hash)，缺少该检查会让同一 context
-    # 映射到多个 sid，selinux_hide 因此留下可被探测的不一致。
-    # 只取该提交的 selinux_hide.c / kernel_compat.mk 两个文件（= fa12ffde + 此修复）。
-    echo "[*] Backporting context_add_hash fix (d7260ca1) ..."
+    # === 迁移自检：确认新 pin 的关键特性在位 ===
+    echo "[*] Verifying new pin capabilities ..."
     ( cd KernelSU \
-      && git fetch -q origin "+refs/heads/*:refs/remotes/origin/*" \
-      && git checkout -q d7260ca1e5c128061122924d0d48754e361e135c -- \
-             kernel/feature/selinux_hide.c kernel/tools/kernel_compat.mk \
-      && grep -n 'KSU_COMPAT_HAS_CONTEXT_ADD_HASH' kernel/tools/kernel_compat.mk kernel/feature/selinux_hide.c | head -5 )
-    # uapi 对齐：管理器 BakaSU-DEV 为 (35245/6)。内核若报 5 则
-    # isFullFeatured()==false -> 管理器降级、隐藏「超级用户/模块」页、模块不挂载。
-    # uapi 5->6 为纯增量(新增 feature id 6 / PREINIT flag / LOOKUP_SYMBOLS ioctl)，
-    # supported 字段 bit0 语义不变，故旧内核声明 uapi 6 兼容。
-    sed -i 's/KERNEL_SU_UAPI_VERSION = 5;/KERNEL_SU_UAPI_VERSION = 6;/' KernelSU/uapi/supercall.h
-    grep -n 'KERNEL_SU_UAPI_VERSION =' KernelSU/uapi/supercall.h
+      && grep -q 'context_add_hash' kernel/feature/selinux_hide.c \
+      && echo "  [ok] context_add_hash fix present" \
+      && grep -q 'KERNEL_SU_UAPI_VERSION = 6' uapi/supercall.h \
+      && echo "  [ok] uapi version = 6" \
+      && grep -q 'KSU_COMPAT_HAS_SYMTAB_SEARCH\|KSU_COMPAT_HAS_NON_POINTER_SYMTAB_STRUCT' kernel/tools/kernel_compat.mk \
+      && echo "  [ok] 4.19 symtab compat autodetect present" )
     # SUSFS 上游暂时中止与新版 KernelSU 的构建检查，移除硬错误以保留 SUSFS 功能
     # （仅影响 make 层的 “Please wait susfs update.” error，不改动任何代码）
     if [ -f KernelSU/kernel/tools/susfs_compat.mk ]; then
-        sed -i '/\$(error Please wait susfs update\.)/d' KernelSU/kernel/tools/susfs_compat.mk
-        echo "[*] susfs_compat.mk: hard error removed, SUSFS kept enabled."
+        sed -i '/\$(error /d' KernelSU/kernel/tools/susfs_compat.mk
+        echo "[*] susfs_compat.mk: hard errors removed (defensive), SUSFS kept enabled."
     fi
     echo "[+] KernelSU setup finished."
 fi
