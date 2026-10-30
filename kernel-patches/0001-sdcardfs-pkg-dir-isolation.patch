@@ -12,7 +12,7 @@ diff --git a/fs/sdcardfs/sdcardfs.h b/fs/sdcardfs/sdcardfs.h
 diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 --- a/fs/sdcardfs/packagelist.c
 +++ b/fs/sdcardfs/packagelist.c
-@@ -174,6 +174,93 @@
+@@ -174,6 +174,101 @@
  	return 1;
  }
  
@@ -39,6 +39,10 @@ diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 +module_param_named(pkg_iso_allow, sdcardfs_pkg_iso_allow, charp, 0644);
 +MODULE_PARM_DESC(pkg_iso_allow,
 +	"Comma separated uids allowed to see other apps' Android/data and Android/obb");
++
++static bool sdcardfs_pkg_iso_debug;
++module_param_named(pkg_iso_debug, sdcardfs_pkg_iso_debug, bool, 0644);
++MODULE_PARM_DESC(pkg_iso_debug, "Log pkg-isolation decisions (default off)");
 +
 +static bool sdcardfs_uid_allowlisted(uid_t uid)
 +{
@@ -95,12 +99,16 @@ diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 +
 +	/* 不是已知包名（例如 .nomedia 之类）则不干预 */
 +	appid = __get_appid(name);
-+	if (appid == 0)
-+		return false;
++	owner = appid ? multiuser_get_uid(pd->userid, appid) : 0;
 +
-+	owner = multiuser_get_uid(pd->userid, appid);
++	if (sdcardfs_pkg_iso_debug) {
++		pr_info("sdcardfs-iso: caller=%u name=%.*s appid=%u owner=%u perm=%d userid=%u -> hide=%d\n",
++			caller, name->len, name->name, appid, owner,
++			(int)pd->perm, (unsigned)pd->userid,
++			(appid && owner != caller) ? 1 : 0);
++	}
 +
-+	return owner != caller;
++	return appid && owner != caller;
 +}
 +
  static struct hashtable_entry *alloc_hashtable_entry(const struct qstr *key,
