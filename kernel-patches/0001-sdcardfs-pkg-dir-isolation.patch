@@ -12,7 +12,7 @@ diff --git a/fs/sdcardfs/sdcardfs.h b/fs/sdcardfs/sdcardfs.h
 diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 --- a/fs/sdcardfs/packagelist.c
 +++ b/fs/sdcardfs/packagelist.c
-@@ -174,6 +174,101 @@
+@@ -174,6 +174,112 @@
  	return 1;
  }
  
@@ -76,6 +76,7 @@ diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 +	uid_t caller;
 +	appid_t appid;
 +	uid_t owner;
++	struct qstr key;
 +
 +	if (!parent_node || !name)
 +		return false;
@@ -97,8 +98,18 @@ diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 +	if (sdcardfs_uid_allowlisted(caller))
 +		return false;
 +
-+	/* 不是已知包名（例如 .nomedia 之类）则不干预 */
-+	appid = __get_appid(name);
++	/*
++	 * 注意：不能直接用 dentry->d_name 的 hash 去查表 —— 那份 hash 来自
++	 * VFS 的 nd->last（按字节算），和 packagelist 建表时用的
++	 * full_name_case_hash（大小写无关）不是同一套。名字里只要有一个
++	 * 大写字母就查不到，appid 会变成 0，属主判定随之失效（连自己的目录
++	 * 也会被误拦）。这里统一按建表规则重算一次。
++	 */
++	key.name = name->name;
++	key.len = name->len;
++	key.hash = full_name_case_hash(0, key.name, key.len);
++
++	appid = __get_appid(&key);
 +	owner = appid ? multiuser_get_uid(pd->userid, appid) : 0;
 +
 +	if (sdcardfs_pkg_iso_debug) {
