@@ -3772,6 +3772,20 @@ struct dentry *proc_pid_lookup(struct inode *dir, struct dentry * dentry, unsign
 	if (!task)
 		goto out;
 
+	/*
+	 * Hidepid consistency for direct numeric lookups: if the task is
+	 * invisible to the caller, do NOT instantiate the dentry and return
+	 * -ENOENT here. Doing this at lookup time (instead of relying on
+	 * pid_getattr/proc_pid_permission) prevents LSM/SELinux from turning
+	 * the failure into an auditable EACCES denial, which would otherwise
+	 * leak the existence of a hidden task (denial vs ENOENT is
+	 * distinguishable by unprivileged callers).
+	 */
+	if (!has_pid_permissions(ns, task, HIDEPID_INVISIBLE)) {
+		put_task_struct(task);
+		goto out;
+	}
+
 	result = proc_pid_instantiate(dentry, task, NULL);
 	put_task_struct(task);
 out:
