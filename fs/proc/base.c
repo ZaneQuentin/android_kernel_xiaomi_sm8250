@@ -2109,6 +2109,17 @@ static int pid_revalidate(struct dentry *dentry, unsigned int flags)
 	task = get_proc_task(inode);
 
 	if (task) {
+		/*
+		 * Same hidepid consistency as proc_pid_lookup: if the task is
+		 * invisible to the caller, drop the (possibly cached) dentry so
+		 * that stat/open fall back to lookup, which returns -ENOENT.
+		 * Otherwise a cached dentry lets LSM/SELinux produce an auditable
+		 * EACCES that leaks task existence to unprivileged callers.
+		 */
+		if (!has_pid_permissions(proc_pid_ns(inode), task, HIDEPID_INVISIBLE)) {
+			put_task_struct(task);
+			return 0;
+		}
 		pid_update_inode(task, inode);
 		put_task_struct(task);
 		return 1;
