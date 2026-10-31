@@ -12,7 +12,7 @@ diff --git a/fs/sdcardfs/sdcardfs.h b/fs/sdcardfs/sdcardfs.h
 diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 --- a/fs/sdcardfs/packagelist.c
 +++ b/fs/sdcardfs/packagelist.c
-@@ -174,6 +174,112 @@
+@@ -174,6 +174,119 @@
  	return 1;
  }
  
@@ -85,8 +85,15 @@ diff --git a/fs/sdcardfs/packagelist.c b/fs/sdcardfs/packagelist.c
 +	if (!pd)
 +		return false;
 +
-+	/* 只处理 /Android/data/<包名> 与 /Android/obb/<包名> 这一层 */
-+	if (pd->perm != PERM_ANDROID_DATA && pd->perm != PERM_ANDROID_OBB)
++	/*
++	 * 处理 /Android/{data,obb,media}/<包名> 这一层。
++	 * media 也必须算进来：实测仅靠 data+obb 时，被隐藏的 Telegram
++	 * 仍能通过 /sdcard/Android/media/org.telegram.messenger 被别的应用看到，
++	 * 检测方据此报「隐藏应用列表生效」。
++	 */
++	if (pd->perm != PERM_ANDROID_DATA &&
++	    pd->perm != PERM_ANDROID_OBB &&
++	    pd->perm != PERM_ANDROID_MEDIA)
 +		return false;
 +
 +	caller = from_kuid(&init_user_ns, current_fsuid());
