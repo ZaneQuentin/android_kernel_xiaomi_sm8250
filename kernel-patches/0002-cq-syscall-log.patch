@@ -1,0 +1,147 @@
+--- a/fs/open.c
++++ b/fs/open.c
+@@ -34,6 +34,7 @@
+ #ifdef CONFIG_KSU_SUSFS
+ #include <linux/susfs_def.h>
+ #endif
++#include <linux/cq_log.h>
+ 
+ #include "internal.h"
+ #include <trace/hooks/syscall_check.h>
+@@ -1130,6 +1131,9 @@
+ 	if (fd)
+ 		return fd;
+ 
++	if (cq_log_match())
++		cq_log_upath("open", filename);
++
+ 	tmp = getname(filename);
+ 	if (IS_ERR(tmp))
+ 		return PTR_ERR(tmp);
+--- a/fs/stat.c
++++ b/fs/stat.c
+@@ -18,6 +18,7 @@
+ #include <linux/pagemap.h>
+ #include <linux/compat.h>
+ #include "internal.h"
++#include <linux/cq_log.h>
+ 
+ #include <linux/uaccess.h>
+ #include <asm/unistd.h>
+@@ -252,6 +253,9 @@
+ 	if (flags & AT_EMPTY_PATH)
+ 		lookup_flags |= LOOKUP_EMPTY;
+ 
++	if (cq_log_match())
++		cq_log_upath("stat", filename);
++
+ retry:
+ #ifdef CONFIG_KSU_SUSFS
+ 	fname = getname_flags(filename, lookup_flags, NULL);
+--- a/fs/readdir.c
++++ b/fs/readdir.c
+@@ -21,6 +21,8 @@
+ #include <linux/unistd.h>
+ #include <linux/compat.h>
+ 
++#include <linux/cq_log.h>
++
+ #ifdef CONFIG_KSU_SUSFS_SUS_PATH
+ #include <linux/susfs_def.h>
+ extern int susfs_get_data_path(struct path *path);
+@@ -34,6 +36,10 @@
+ 	struct inode *inode = file_inode(file);
+ 	bool shared = false;
+ 	int res = -ENOTDIR;
++
++	if (cq_log_match())
++		cq_log_fpath("readdir", file);
++
+ 	if (file->f_op->iterate_shared)
+ 		shared = true;
+ 	else if (!file->f_op->iterate)
+--- a/fs/Makefile
++++ b/fs/Makefile
+@@ -15,6 +15,8 @@
+ 		stack.o fs_struct.o statfs.o fs_pin.o nsfs.o \
+ 		fs_context.o fs_parser.o
+ 
++obj-y += cq_log.o
++
+ obj-$(CONFIG_KSU_SUSFS) += susfs.o
+ 
+ ifeq ($(CONFIG_BLOCK),y)
+--- /dev/null
++++ b/fs/cq_log.c
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: GPL-2.0
++#include <linux/cq_log.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/uaccess.h>
++#include <linux/dcache.h>
++#include <linux/path.h>
++#include <linux/moduleparam.h>
++
++int cq_log_uid = 0;
++core_param(cq_log_uid, cq_log_uid, int, 0644);
++
++void cq_log_upath(const char *op, const char __user *pathname)
++{
++	char *buf;
++	long n;
++
++	if (!pathname) {
++		pr_info("cq: %s (null)\n", op);
++		return;
++	}
++	buf = kmalloc(PATH_MAX, GFP_KERNEL);
++	if (!buf)
++		return;
++	n = strncpy_from_user(buf, pathname, PATH_MAX - 1);
++	if (n > 0) {
++		buf[n] = '\0';
++		pr_info("cq: %s %s\n", op, buf);
++	}
++	kfree(buf);
++}
++
++void cq_log_fpath(const char *op, struct file *file)
++{
++	char *buf, *p;
++
++	buf = kmalloc(PATH_MAX, GFP_KERNEL);
++	if (!buf)
++		return;
++	p = d_path(&file->f_path, buf, PATH_MAX);
++	if (!IS_ERR(p))
++		pr_info("cq: %s %s\n", op, p);
++	kfree(buf);
++}
+--- /dev/null
++++ b/include/linux/cq_log.h
+@@ -0,0 +1,24 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/*
++ * cq_log - syscall path logger for diagnosis
++ * Enable via /sys/module/kernel/parameters/cq_log_uid (0 = off).
++ * Logs open/statx/readdir paths of the matched uid into dmesg.
++ */
++#ifndef _LINUX_CQ_LOG_H
++#define _LINUX_CQ_LOG_H
++
++#include <linux/kernel.h>
++#include <linux/cred.h>
++
++extern int cq_log_uid;
++
++static inline bool cq_log_match(void)
++{
++	return cq_log_uid != 0 &&
++		from_kuid(&init_user_ns, current_uid()) == cq_log_uid;
++}
++
++void cq_log_upath(const char *op, const char __user *pathname);
++void cq_log_fpath(const char *op, struct file *file);
++
++#endif /* _LINUX_CQ_LOG_H */
