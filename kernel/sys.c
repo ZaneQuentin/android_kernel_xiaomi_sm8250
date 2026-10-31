@@ -171,6 +171,24 @@ static bool set_one_prio_perm(struct task_struct *p)
 }
 
 /*
+ * hidepid-consistent visibility for getpriority(): without this check the
+ * syscall is an unprivileged process-existence oracle (nice value vs ESRCH),
+ * independent of procfs hidepid. The decision is deliberately audit-free
+ * (ns_capable_noaudit) so that the visibility check itself cannot be
+ * observed through the audit subsystem and counted.
+ */
+static bool task_hidden_from_current(struct task_struct *p)
+{
+	const struct cred *cred = current_cred(), *pcred = __task_cred(p);
+
+	if (uid_eq(pcred->uid, cred->uid) || uid_eq(pcred->euid, cred->uid))
+		return false;
+	if (ns_capable_noaudit(pcred->user_ns, CAP_SYS_NICE))
+		return false;
+	return true;
+}
+
+/*
  * set the priority of a task
  * - the caller must hold the RCU read lock
  */
@@ -289,6 +307,10 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 		else
 			p = current;
 		if (p) {
+			if (p != current && task_hidden_from_current(p))
+				p = NULL;
+		}
+		if (p) {
 			niceval = nice_to_rlimit(task_nice(p));
 			if (niceval > retval)
 				retval = niceval;
@@ -300,6 +322,8 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 		else
 			pgrp = task_pgrp(current);
 		do_each_pid_thread(pgrp, PIDTYPE_PGID, p) {
+			if (task_hidden_from_current(p))
+				continue;
 			niceval = nice_to_rlimit(task_nice(p));
 			if (niceval > retval)
 				retval = niceval;
@@ -316,7 +340,8 @@ SYSCALL_DEFINE2(getpriority, int, which, int, who)
 				goto out_unlock;	/* No processes for this user */
 		}
 		do_each_thread(g, p) {
-			if (uid_eq(task_uid(p), uid) && task_pid_vnr(p)) {
+			if (uid_eq(task_uid(p), uid) && task_pid_vnr(p) &&
+			    !task_hidden_from_current(p)) {
 				niceval = nice_to_rlimit(task_nice(p));
 				if (niceval > retval)
 					retval = niceval;
