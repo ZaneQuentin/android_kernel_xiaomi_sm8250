@@ -89,11 +89,13 @@ if [ "$ENABLE_KSU" -eq 1 ]; then
     echo "==========================================="
     echo " [*] Initializing KernelSU (ReSukiSU) Setup"
     echo "==========================================="
+    # 2026-11-07：对齐到 main HEAD，使内核侧 driver version 与管理器/ksud (35257) 一致
+    #   （原 pin fa12ffde 对应 35225，管理器已是 35257 -> 春秋报 Abnormal Environment(k)）
     # 基线：包含 selinux_hide 时间侧信道修复的提交
     # (cherry-pick of tiann/KernelSU#3877, "fix time side-channel detection in selinux hide")
     # 注：sync-upstream 分支已改用 5.x API (close_fd / ksu_preinit_handle_execve_manual)，
     #     在 4.19 上链接失败，故仍使用本基线。
-    KSU_COMMIT="fa12ffde8244008e9afdb7ac0c1bb1bc1b06b95a"
+    KSU_COMMIT="516d3e87fbc986ccefdde2c2765f1700612441a9"
     echo "[*] Downloading and running BakaSU remote setup script..."
     curl -LSs "https://raw.githubusercontent.com/Baka-SU/BakaSU/main/kernel/setup.sh" | bash
     echo "[*] Pinning KernelSU to ${KSU_COMMIT} ..."
